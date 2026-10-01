@@ -2,8 +2,8 @@ require('dotenv').config();
 const TelegramBot = require('node-telegram-bot-api');
 const { exec } = require('child_process');
 
-const token = process.env.TELEGRAM_TOKEN || '8672337793:AAEeod2BIgXzumDZvSN5C6xP1UrF4frICAA';
-const chatId = process.env.CHAT_ID || '6567581869';
+const token = process.env.TELEGRAM_TOKEN;
+const chatId = process.env.CHAT_ID;
 const bot = new TelegramBot(token, { polling: true });
 
 // Register Native Bot Menu Commands
