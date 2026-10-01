@@ -4,14 +4,14 @@ const { exec } = require('child_process');
 
 const token = process.env.TELEGRAM_TOKEN || '8672337793:AAEeod2BIgXzumDZvSN5C6xP1UrF4frICAA';
 const chatId = process.env.CHAT_ID || '6567581869';
-const bot = new TelegramBot(token, {polling: true});
+const bot = new TelegramBot(token, { polling: true });
 
 // Register Native Bot Menu Commands
 bot.setMyCommands([
     { command: 'start', description: 'Mulai / Tampilkan Keyboard' },
     { command: 'suhu', description: 'Cek Suhu CPU' },
     { command: 'status', description: 'Cek Status (RAM, Disk, Baterai)' },
-    { command: 'services', description: 'Cek PM2 Services' }
+    { command: 'services', description: 'Cek Services' }
 ]);
 
 const runCmd = (cmd, timeout = 5000) => new Promise((resolve) => {
@@ -24,7 +24,7 @@ const menuKeyboard = {
     reply_markup: {
         keyboard: [
             [{ text: '🌡️ Cek Suhu' }, { text: '📊 Cek Status' }],
-            [{ text: '⚙️ PM2 Services' }]
+            [{ text: '⚙️ Services' }]
         ],
         resize_keyboard: true,
         is_persistent: true
@@ -37,9 +37,9 @@ async function handleSuhu(msg) {
     const stdout = await runCmd("paste <(cat /sys/class/thermal/thermal_zone*/type 2>/dev/null) <(cat /sys/class/thermal/thermal_zone*/temp 2>/dev/null) | grep -E 'cpu-[0-9]-[0-9]-usr'");
     const result = stdout.trim().split('\n').map(l => {
         const parts = l.split(/\s+/);
-        if(parts.length < 2) return '';
-        const temp = parseFloat(parts[1])/1000;
-        if(temp > 0) return `- ${parts[0]}: ${temp} °C`;
+        if (parts.length < 2) return '';
+        const temp = parseFloat(parts[1]) / 1000;
+        if (temp > 0) return `- ${parts[0]}: ${temp} °C`;
         return '';
     }).filter(l => l).sort().join('\n');
     bot.sendMessage(chatId, '=== Suhu CPU ===\n' + result);
@@ -47,7 +47,7 @@ async function handleSuhu(msg) {
 
 async function handleStatus(msg) {
     if (msg.chat.id.toString() !== chatId) return;
-    
+
     bot.sendChatAction(chatId, 'typing');
     try {
         let uptimeStr = "N/A";
@@ -55,8 +55,8 @@ async function handleStatus(msg) {
             const upRaw = await runCmd("ssh -o StrictHostKeyChecking=no -p 8022 127.0.0.1 uptime");
             const upMatch = upRaw.match(/up\s+(.*?),\s+\d+\s+users/);
             if (upMatch) uptimeStr = upMatch[1];
-        } catch(e) {}
-        
+        } catch (e) { }
+
         const freeOut = await runCmd("free -h");
         const freeLines = freeOut.trim().split('\n');
         const mem = freeLines[1].split(/\s+/);
@@ -66,12 +66,12 @@ async function handleStatus(msg) {
             const swapArr = freeLines[2].split(/\s+/);
             if (swapArr.length >= 3) swapStr = `${swapArr[2]} / ${swapArr[1]}`;
         }
-        
+
         const dfOut = await runCmd("df -h /");
         const dfLines = dfOut.trim().split('\n');
         const diskArr = dfLines[dfLines.length - 1].split(/\s+/);
         const diskStr = `${diskArr[3]} Sisa (${diskArr[4]} terpakai)`;
-        
+
         let batStr = 'N/A';
         let genTempStr = 'N/A';
         try {
@@ -81,32 +81,32 @@ async function handleStatus(msg) {
             const chargeText = isCharging ? '(Sedang Mengecas)' : '(Tidak Mengecas)';
             batStr = `${batJson.percentage}% ${chargeText}`;
             genTempStr = `${batJson.temperature}°C`;
-        } catch(e) {}
-        
+        } catch (e) { }
+
         let cpuTempStr = "";
         try {
             const stdout = await runCmd("paste <(cat /sys/class/thermal/thermal_zone*/type 2>/dev/null) <(cat /sys/class/thermal/thermal_zone*/temp 2>/dev/null) | grep -E 'cpu-[0-9]-[0-9]-usr'");
             const temps = [];
             stdout.trim().split('\n').forEach(l => {
                 const parts = l.split(/\s+/);
-                if(parts.length >= 2) {
-                    const temp = parseFloat(parts[1])/1000;
-                    if(temp > 0) {
+                if (parts.length >= 2) {
+                    const temp = parseFloat(parts[1]) / 1000;
+                    if (temp > 0) {
                         const label = parts[0].replace('cpu-', '').replace('-usr', '');
                         temps.push(`[${label}] ${temp.toFixed(1)}`);
                     }
                 }
             });
             temps.sort();
-            for(let i = 0; i < temps.length; i += 2) {
-                if(i + 1 < temps.length) {
-                    cpuTempStr += `${temps[i].padEnd(12)} ${temps[i+1]}\n`;
+            for (let i = 0; i < temps.length; i += 2) {
+                if (i + 1 < temps.length) {
+                    cpuTempStr += `${temps[i].padEnd(12)} ${temps[i + 1]}\n`;
                 } else {
                     cpuTempStr += `${temps[i]}\n`;
                 }
             }
-        } catch(e) {}
-        
+        } catch (e) { }
+
         let servicesStr = "";
         try {
             const pm2Out = await runCmd("pm2 jlist");
@@ -122,7 +122,7 @@ async function handleStatus(msg) {
                 }
                 servicesStr += `${statusIcon} \`${app.name}\` ${usage}\n`;
             });
-        } catch(e) {}
+        } catch (e) { }
 
         const finalMsg = `🖥 *VPS SYSTEM MONITOR* 
 ⏱ Uptime: ${uptimeStr}
@@ -144,7 +144,7 @@ ${cpuTempStr.trim()}
 ${servicesStr.trim()}`;
 
         bot.sendMessage(chatId, finalMsg, { parse_mode: 'Markdown' });
-    } catch(e) {
+    } catch (e) {
         console.error(e);
         bot.sendMessage(chatId, 'Error generating dashboard');
     }
@@ -155,7 +155,7 @@ async function handleServices(msg) {
     exec('pm2 jlist', (err, stdout) => {
         try {
             const list = JSON.parse(stdout);
-            let response = '=== PM2 Services ===\n';
+            let response = '=== Services ===\n';
             list.forEach(app => {
                 const isOnline = app.pm2_env.status === 'online';
                 const status = isOnline ? '✅' : '❌';
@@ -168,7 +168,7 @@ async function handleServices(msg) {
                 response += `${status} ${app.name}${usage}\n`;
             });
             bot.sendMessage(chatId, response);
-        } catch(e) {
+        } catch (e) {
             bot.sendMessage(chatId, 'Gagal membaca PM2 jlist.');
         }
     });
@@ -183,7 +183,7 @@ bot.onText(/\/services/, handleServices);
 bot.on('message', (msg) => {
     if (msg.text === '🌡️ Cek Suhu') handleSuhu(msg);
     if (msg.text === '📊 Cek Status') handleStatus(msg);
-    if (msg.text === '⚙️ PM2 Services') handleServices(msg);
+    if (msg.text === '⚙️ Services') handleServices(msg);
 });
 
 bot.onText(/\/start/, (msg) => {
@@ -202,24 +202,24 @@ setInterval(() => {
             let sum = 0, n = 0;
             lines.forEach(l => {
                 const parts = l.split(/\s+/);
-                if(parts.length >= 2) {
-                    const temp = parseFloat(parts[1])/1000;
-                    if(temp > 0) { sum += temp; n++; }
+                if (parts.length >= 2) {
+                    const temp = parseFloat(parts[1]) / 1000;
+                    if (temp > 0) { sum += temp; n++; }
                 }
             });
-            if(n > 0) {
+            if (n > 0) {
                 const avgTemp = sum / n;
                 if (avgTemp > 65) {
                     const now = Date.now();
-                    if (now - lastTempWarn > 30 * 60 * 1000) { 
-                        bot.sendMessage(chatId, `⚠️ *Peringatan Suhu!* ⚠️\nSuhu rata-rata CPU menyentuh *${avgTemp.toFixed(1)}°C*!`, {parse_mode: 'Markdown'});
+                    if (now - lastTempWarn > 30 * 60 * 1000) {
+                        bot.sendMessage(chatId, `⚠️ *Peringatan Suhu!* ⚠️\nSuhu rata-rata CPU menyentuh *${avgTemp.toFixed(1)}°C*!`, { parse_mode: 'Markdown' });
                         lastTempWarn = now;
                     }
                 } else if (avgTemp < 50) {
-                    lastTempWarn = 0; 
+                    lastTempWarn = 0;
                 }
             }
-        } catch(e) {}
+        } catch (e) { }
     });
 
     exec('pm2 jlist', (err, stdout) => {
@@ -230,11 +230,11 @@ setInterval(() => {
                 const status = app.pm2_env.status;
                 if (name === 'sysadmin-bot') return;
                 if (serviceStates[name] && serviceStates[name] === 'online' && status !== 'online') {
-                    bot.sendMessage(chatId, `🚨 *Peringatan Servis!* 🚨\nAplikasi *${name}* baru saja mati (Status: ${status}).`, {parse_mode: 'Markdown'});
+                    bot.sendMessage(chatId, `🚨 *Peringatan Servis!* 🚨\nAplikasi *${name}* baru saja mati (Status: ${status}).`, { parse_mode: 'Markdown' });
                 }
                 serviceStates[name] = status;
             });
-        } catch(e) {}
+        } catch (e) { }
     });
 }, 60 * 1000);
 
