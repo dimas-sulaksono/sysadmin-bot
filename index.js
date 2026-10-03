@@ -13,7 +13,8 @@ bot.setMyCommands([
     { command: 'restart', description: 'Restart Servis' },
     { command: 'logs', description: 'Ambil Log Servis' },
     { command: 'deploy', description: 'Manual Deploy / Update' },
-    { command: 'network', description: 'Cek Status Jaringan' }
+    { command: 'network', description: 'Cek Status Jaringan' },
+    { command: 'speedtest', description: 'Uji Kecepatan Internet' }
 ]);
 
 const runCmd = (cmd, timeout = 5000) => new Promise((resolve) => {
@@ -27,7 +28,8 @@ const menuKeyboard = {
         keyboard: [
             [{ text: '📊 Dasbor Utama' }],
             [{ text: '🔄 Restart Servis' }, { text: '📜 Ambil Log' }],
-            [{ text: '🚀 Manual Deploy' }, { text: '🕸️ Jaringan' }]
+            [{ text: '🚀 Manual Deploy' }, { text: '🕸️ Jaringan' }],
+            [{ text: '⚡ Speedtest' }]
         ],
         resize_keyboard: true,
         is_persistent: true
@@ -75,6 +77,13 @@ async function handleNetwork(msg) {
     const ping = await runCmd("curl -I -s https://api.telegram.org -m 3 | head -n 1");
     const out = `=== Tailscale ===\n${tailscale.trim()}\n\n=== Ping Telegram API ===\n${ping.trim()}`;
     bot.sendMessage(chatId, `\`\`\`text\n${out.substring(0, 3900)}\n\`\`\``, { parse_mode: 'Markdown' });
+}
+
+async function handleSpeedtest(msg) {
+    if (msg.chat.id.toString() !== chatId) return;
+    bot.sendMessage(chatId, '⚡ *Memulai Speedtest...* (Estimasi 30-40 detik)', { parse_mode: 'Markdown' });
+    const out = await runCmd("curl -s https://raw.githubusercontent.com/sivel/speedtest-cli/master/speedtest.py | python3 - --simple", 60000);
+    bot.sendMessage(chatId, `=== Hasil Speedtest ===\n\`\`\`text\n${out.trim()}\n\`\`\``, { parse_mode: 'Markdown' });
 }
 
 async function handleStatus(msg) {
@@ -248,6 +257,7 @@ bot.onText(/\/restart/, handleRestartMenu);
 bot.onText(/\/logs/, handleFetchLogsMenu);
 bot.onText(/\/deploy/, handleDeploy);
 bot.onText(/\/network/, handleNetwork);
+bot.onText(/\/speedtest/, handleSpeedtest);
 
 // Text buttons
 bot.on('message', (msg) => {
@@ -256,6 +266,7 @@ bot.on('message', (msg) => {
     if (msg.text === '📜 Ambil Log') handleFetchLogsMenu(msg);
     if (msg.text === '🚀 Manual Deploy') handleDeploy(msg);
     if (msg.text === '🕸️ Jaringan') handleNetwork(msg);
+    if (msg.text === '⚡ Speedtest') handleSpeedtest(msg);
 });
 
 bot.onText(/\/start/, (msg) => {
