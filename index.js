@@ -8,10 +8,12 @@ const bot = new TelegramBot(token, { polling: true });
 
 // Register Native Bot Menu Commands
 bot.setMyCommands([
-    { command: 'start', description: 'Mulai / Tampilkan Keyboard' },
-    { command: 'suhu', description: 'Cek Suhu CPU' },
-    { command: 'status', description: 'Cek Status (RAM, Disk, Baterai)' },
-    { command: 'services', description: 'Cek Services' }
+    { command: 'start', description: 'Mulai / Tampilkan Dasbor' },
+    { command: 'status', description: 'Cek Dasbor Utama' },
+    { command: 'restart', description: 'Restart Servis' },
+    { command: 'logs', description: 'Ambil Log Servis' },
+    { command: 'deploy', description: 'Manual Deploy / Update' },
+    { command: 'network', description: 'Cek Status Jaringan' }
 ]);
 
 const runCmd = (cmd, timeout = 5000) => new Promise((resolve) => {
@@ -23,8 +25,9 @@ const runCmd = (cmd, timeout = 5000) => new Promise((resolve) => {
 const menuKeyboard = {
     reply_markup: {
         keyboard: [
-            [{ text: '🌡️ Cek Suhu' }, { text: '📊 Cek Status' }],
-            [{ text: '⚙️ Services' }]
+            [{ text: '📊 Dasbor Utama' }],
+            [{ text: '🔄 Restart Servis' }, { text: '📜 Ambil Log' }],
+            [{ text: '🚀 Manual Deploy' }, { text: '🕸️ Jaringan' }]
         ],
         resize_keyboard: true,
         is_persistent: true
@@ -32,17 +35,46 @@ const menuKeyboard = {
     parse_mode: 'Markdown'
 };
 
-async function handleSuhu(msg) {
+async function handleRestartMenu(msg) {
     if (msg.chat.id.toString() !== chatId) return;
-    const stdout = await runCmd("paste <(cat /sys/class/thermal/thermal_zone*/type 2>/dev/null) <(cat /sys/class/thermal/thermal_zone*/temp 2>/dev/null) | grep -E 'cpu-[0-9]-[0-9]-usr'");
-    const result = stdout.trim().split('\n').map(l => {
-        const parts = l.split(/\s+/);
-        if (parts.length < 2) return '';
-        const temp = parseFloat(parts[1]) / 1000;
-        if (temp > 0) return `- ${parts[0]}: ${temp} °C`;
-        return '';
-    }).filter(l => l).sort().join('\n');
-    bot.sendMessage(chatId, '=== Suhu CPU ===\n' + result);
+    bot.sendMessage(chatId, 'Pilih servis yang ingin di-*restart*:', {
+        parse_mode: 'Markdown',
+        reply_markup: {
+            inline_keyboard: [
+                [{ text: 'sysadmin-bot', callback_data: 'restart_sysadmin-bot' }, { text: 'vermi-web', callback_data: 'restart_vermi-web' }],
+                [{ text: 'cloudflare-tunnel', callback_data: 'restart_cloudflare-tunnel' }, { text: 'mariadb', callback_data: 'restart_mariadb' }]
+            ]
+        }
+    });
+}
+
+async function handleFetchLogsMenu(msg) {
+    if (msg.chat.id.toString() !== chatId) return;
+    bot.sendMessage(chatId, 'Pilih servis untuk mengambil *Log* (15 Baris Terakhir):', {
+        parse_mode: 'Markdown',
+        reply_markup: {
+            inline_keyboard: [
+                [{ text: 'sysadmin-bot', callback_data: 'logs_sysadmin-bot' }, { text: 'vermi-web', callback_data: 'logs_vermi-web' }],
+                [{ text: 'cloudflare-tunnel', callback_data: 'logs_cloudflare-tunnel' }, { text: 'mariadb', callback_data: 'logs_mariadb' }]
+            ]
+        }
+    });
+}
+
+async function handleDeploy(msg) {
+    if (msg.chat.id.toString() !== chatId) return;
+    bot.sendMessage(chatId, '🚀 *Memulai Manual Deploy...*', { parse_mode: 'Markdown' });
+    const out = await runCmd("bash /root/scripts/deploy-sysadmin-bot.sh", 15000);
+    bot.sendMessage(chatId, `\`\`\`text\n${out.substring(0, 3900)}\n\`\`\``, { parse_mode: 'Markdown' });
+}
+
+async function handleNetwork(msg) {
+    if (msg.chat.id.toString() !== chatId) return;
+    bot.sendMessage(chatId, '🕸️ *Mengecek Jaringan...*', { parse_mode: 'Markdown' });
+    const tailscale = await runCmd("tailscale status");
+    const ping = await runCmd("curl -I -s https://api.telegram.org -m 3 | head -n 1");
+    const out = `=== Tailscale ===\n${tailscale.trim()}\n\n=== Ping Telegram API ===\n${ping.trim()}`;
+    bot.sendMessage(chatId, `\`\`\`text\n${out.substring(0, 3900)}\n\`\`\``, { parse_mode: 'Markdown' });
 }
 
 async function handleStatus(msg) {
@@ -189,40 +221,41 @@ ${servicesStr.trim()}`;
     }
 }
 
-async function handleServices(msg) {
-    if (msg.chat.id.toString() !== chatId) return;
-    exec('pm2 jlist', (err, stdout) => {
-        try {
-            const list = JSON.parse(stdout);
-            let response = '=== Services ===\n';
-            list.forEach(app => {
-                const isOnline = app.pm2_env.status === 'online';
-                const status = isOnline ? '✅' : '❌';
-                let usage = isOnline ? '' : ' (stopped)';
-                if (isOnline && app.monit) {
-                    const memMB = (app.monit.memory / 1024 / 1024).toFixed(1) + 'MB';
-                    const cpu = app.monit.cpu + '%';
-                    usage = ` [CPU: ${cpu} | RAM: ${memMB}]`;
-                }
-                response += `${status} ${app.name}${usage}\n`;
-            });
-            bot.sendMessage(chatId, response);
-        } catch (e) {
-            bot.sendMessage(chatId, 'Gagal membaca PM2 jlist.');
-        }
-    });
-}
+// Callback handler for Inline Keyboards
+bot.on('callback_query', async (query) => {
+    if (query.message.chat.id.toString() !== chatId) return;
+    const action = query.data;
+    
+    if (action.startsWith('restart_')) {
+        const app = action.replace('restart_', '');
+        bot.answerCallbackQuery(query.id, { text: `Mereset ${app}...` });
+        bot.editMessageText(`🔄 Mereset \`${app}\`...`, { chat_id: chatId, message_id: query.message.message_id, parse_mode: 'Markdown' });
+        await runCmd(`pm2 restart ${app}`);
+        bot.editMessageText(`✅ Servis \`${app}\` berhasil di-restart!`, { chat_id: chatId, message_id: query.message.message_id, parse_mode: 'Markdown' });
+    }
+    
+    if (action.startsWith('logs_')) {
+        const app = action.replace('logs_', '');
+        bot.answerCallbackQuery(query.id, { text: `Mengambil log ${app}...` });
+        const logs = await runCmd(`pm2 logs ${app} --lines 15 --nostream`);
+        bot.editMessageText(`📜 *Logs: ${app}*\n\`\`\`text\n${logs.substring(0, 3900)}\n\`\`\``, { chat_id: chatId, message_id: query.message.message_id, parse_mode: 'Markdown' });
+    }
+});
 
 // Commands
-bot.onText(/\/suhu/, handleSuhu);
 bot.onText(/\/status/, handleStatus);
-bot.onText(/\/services/, handleServices);
+bot.onText(/\/restart/, handleRestartMenu);
+bot.onText(/\/logs/, handleFetchLogsMenu);
+bot.onText(/\/deploy/, handleDeploy);
+bot.onText(/\/network/, handleNetwork);
 
 // Text buttons
 bot.on('message', (msg) => {
-    if (msg.text === '🌡️ Cek Suhu') handleSuhu(msg);
-    if (msg.text === '📊 Cek Status') handleStatus(msg);
-    if (msg.text === '⚙️ Services') handleServices(msg);
+    if (msg.text === '📊 Dasbor Utama') handleStatus(msg);
+    if (msg.text === '🔄 Restart Servis') handleRestartMenu(msg);
+    if (msg.text === '📜 Ambil Log') handleFetchLogsMenu(msg);
+    if (msg.text === '🚀 Manual Deploy') handleDeploy(msg);
+    if (msg.text === '🕸️ Jaringan') handleNetwork(msg);
 });
 
 bot.onText(/\/start/, (msg) => {
