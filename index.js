@@ -148,7 +148,7 @@ async function handleStatus(msg) {
                 let usage = isOnline ? '' : 'stopped';
                 if (isOnline && app.monit) {
                     const memMB = (app.monit.memory / 1024 / 1024).toFixed(1) + 'MB';
-                    const cpu = app.monit.cpu + '%';
+                    const cpu = (app.monit.cpu || 0).toFixed(1) + '%';
                     usage = `${cpu.padStart(5, ' ')} | ${memMB.padStart(8, ' ')}`;
                 }
                 const namePadded = app.name.padEnd(20, ' ');
