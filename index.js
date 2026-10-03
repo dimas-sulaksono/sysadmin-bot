@@ -57,21 +57,28 @@ async function handleStatus(msg) {
             if (upMatch) uptimeStr = upMatch[1];
         } catch (e) { }
 
+        const makeBar = (pct) => {
+            const p = Math.min(10, Math.max(0, Math.round(parseFloat(pct) / 10)));
+            return '[' + '█'.repeat(p) + '░'.repeat(10 - p) + ']';
+        };
+
         const freeOut = await runCmd("free -b");
         const freeLines = freeOut.trim().split('\n');
         const mem = freeLines[1].split(/\s+/);
         const totalRam = parseInt(mem[1]);
         const usedRam = totalRam - parseInt(mem[6]);
         const ramPct = ((usedRam / totalRam) * 100).toFixed(1);
-        const ramStr = `${ramPct}% ${String((usedRam / 1073741824).toFixed(1)).padStart(5, '0')}/${String((totalRam / 1073741824).toFixed(1)).padStart(5, '0')}GB`;
+        const ramBar = makeBar(ramPct);
+        const ramStr = `├ RAM  ${ramBar} ${ramPct.padStart(5, ' ')}% | ${String((usedRam / 1073741824).toFixed(1)).padStart(5, '0')}/${String((totalRam / 1073741824).toFixed(1)).padStart(5, '0')}GB`;
         
-        let swapStr = 'N/A';
+        let swapStr = '├ Swap N/A';
         if (freeLines.length > 2 && freeLines[2].startsWith('Swap:')) {
             const swapArr = freeLines[2].split(/\s+/);
             const totalSwap = parseInt(swapArr[1]);
             const usedSwap = parseInt(swapArr[2]);
             const swapPct = totalSwap > 0 ? ((usedSwap / totalSwap) * 100).toFixed(1) : "0.0";
-            swapStr = `${swapPct}% ${String((usedSwap / 1073741824).toFixed(1)).padStart(5, '0')}/${String((totalSwap / 1073741824).toFixed(1)).padStart(5, '0')}GB`;
+            const swapBar = makeBar(swapPct);
+            swapStr = `├ Swap ${swapBar} ${swapPct.padStart(5, ' ')}% | ${String((usedSwap / 1073741824).toFixed(1)).padStart(5, '0')}/${String((totalSwap / 1073741824).toFixed(1)).padStart(5, '0')}GB`;
         }
 
         const dfOut = await runCmd("df -B1 /");
@@ -79,8 +86,9 @@ async function handleStatus(msg) {
         const diskArr = dfLines[dfLines.length - 1].split(/\s+/);
         const totalDisk = parseInt(diskArr[1]);
         const usedDisk = parseInt(diskArr[2]);
-        const diskPct = diskArr[4]; // e.g. "24%"
-        const diskStr = `${parseFloat(diskPct).toFixed(1)}% ${String((usedDisk / 1073741824).toFixed(1)).padStart(5, '0')}/${String((totalDisk / 1073741824).toFixed(1)).padStart(5, '0')}GB`;
+        const diskPct = parseFloat(diskArr[4]).toFixed(1);
+        const diskBar = makeBar(diskPct);
+        const diskStr = `└ Disk ${diskBar} ${diskPct.padStart(5, ' ')}% | ${String((usedDisk / 1073741824).toFixed(1)).padStart(5, '0')}/${String((totalDisk / 1073741824).toFixed(1)).padStart(5, '0')}GB`;
 
         let cpuUsageStr = "N/A";
         try {
@@ -91,7 +99,8 @@ async function handleStatus(msg) {
                 if (!isNaN(val)) sum += val;
             });
             const overallPct = (sum / 8).toFixed(1);
-            cpuUsageStr = `${overallPct}%`;
+            const cpuBar = makeBar(overallPct);
+            cpuUsageStr = `├ CPU  ${cpuBar} ${overallPct.padStart(5, ' ')}%`;
         } catch(e) {}
 
         let batStr = 'N/A';
@@ -140,10 +149,11 @@ async function handleStatus(msg) {
                 if (isOnline && app.monit) {
                     const memMB = (app.monit.memory / 1024 / 1024).toFixed(1) + 'MB';
                     const cpu = app.monit.cpu + '%';
-                    usage = `${cpu} | ${memMB}`;
+                    usage = `${cpu.padStart(5, ' ')} | ${memMB.padStart(8, ' ')}`;
                 }
                 const namePadded = app.name.padEnd(20, ' ');
-                servicesStr += `${statusIcon} ${namePadded} ${usage}\n`;
+                // Menggunakan inline monospace agar emoji tetap berwarna namun teks sejajar
+                servicesStr += `${statusIcon} \`${namePadded} ${usage}\`\n`;
             });
         } catch (e) { }
 
@@ -151,10 +161,12 @@ async function handleStatus(msg) {
 ⏱ Uptime: ${uptimeStr}
 
 📊 *Resource Usage*
-├ CPU    ${cpuUsageStr}
-├ RAM   ${ramStr}
-├ Swap  ${swapStr}
-└ Disk    ${diskStr}
+\`\`\`text
+${cpuUsageStr}
+${ramStr}
+${swapStr}
+${diskStr}
+\`\`\`
 
 📱 *Device Health*
 ├ Baterai ${batStr}
@@ -164,6 +176,7 @@ async function handleStatus(msg) {
 \`\`\`text
 ${cpuTempStr.trim()}
 \`\`\`
+
 ⚙️ *Services*
 ${servicesStr.trim()}`;
 
