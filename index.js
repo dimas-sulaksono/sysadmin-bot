@@ -86,19 +86,16 @@ async function handleStatus(msg) {
 
         let cpuUsageStr = "N/A";
         try {
-            const stat1 = await runCmd("cat /proc/stat | grep '^cpu '");
-            await new Promise(r => setTimeout(r, 500));
-            const stat2 = await runCmd("cat /proc/stat | grep '^cpu '");
-            const getVars = (line) => {
-                const p = line.split(/\s+/);
-                const idle = parseInt(p[4]);
-                const total = parseInt(p[1]) + parseInt(p[2]) + parseInt(p[3]) + idle + parseInt(p[5]) + parseInt(p[6]) + parseInt(p[7]);
-                return { idle, total };
-            };
-            const s1 = getVars(stat1);
-            const s2 = getVars(stat2);
-            const cpuPct = (((s2.total - s1.total) - (s2.idle - s1.idle)) / (s2.total - s1.total) * 100).toFixed(1);
-            cpuUsageStr = `${cpuPct}%`;
+            // Mengambil metrik %CPU dari seluruh proses Termux (karena /proc/stat global diblokir oleh Android 8+ Security)
+            const psOut = await runCmd("ssh -o StrictHostKeyChecking=no -p 8022 127.0.0.1 'ps -A -o %cpu'");
+            let sum = 0;
+            psOut.trim().split('\n').forEach(line => {
+                const val = parseFloat(line.trim());
+                if (!isNaN(val)) sum += val;
+            });
+            // Karena ini CPU 8-Core (800% max), kita bagi 8 agar menjadi format 100%
+            const overallPct = (sum / 8).toFixed(1);
+            cpuUsageStr = `${overallPct}%`;
         } catch(e) {}
 
         let batStr = 'N/A';
