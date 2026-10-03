@@ -69,7 +69,7 @@ async function handleStatus(msg) {
         const usedRam = totalRam - parseInt(mem[6]);
         const ramPct = ((usedRam / totalRam) * 100).toFixed(1);
         const ramBar = makeBar(ramPct);
-        const ramStr = `├ RAM  ${ramBar} ${ramPct.padStart(5, ' ')}% | ${String((usedRam / 1073741824).toFixed(1)).padStart(5, '0')}/${String((totalRam / 1073741824).toFixed(1)).padStart(5, '0')}GB`;
+        const ramStr = `├ RAM  ${ramBar} ${ramPct.padStart(5, ' ')}% | ${String((usedRam / 1073741824).toFixed(1)).padStart(5, ' ')}/${String((totalRam / 1073741824).toFixed(1)).padStart(5, ' ')}GB`;
 
         let swapStr = '├ Swap N/A';
         if (freeLines.length > 2 && freeLines[2].startsWith('Swap:')) {
@@ -78,7 +78,7 @@ async function handleStatus(msg) {
             const usedSwap = parseInt(swapArr[2]);
             const swapPct = totalSwap > 0 ? ((usedSwap / totalSwap) * 100).toFixed(1) : "0.0";
             const swapBar = makeBar(swapPct);
-            swapStr = `├ Swap ${swapBar} ${swapPct.padStart(5, ' ')}% | ${String((usedSwap / 1073741824).toFixed(1)).padStart(5, '0')}/${String((totalSwap / 1073741824).toFixed(1)).padStart(5, '0')}GB`;
+            swapStr = `├ Swap ${swapBar} ${swapPct.padStart(5, ' ')}% | ${String((usedSwap / 1073741824).toFixed(1)).padStart(5, ' ')}/${String((totalSwap / 1073741824).toFixed(1)).padStart(5, ' ')}GB`;
         }
 
         const dfOut = await runCmd("df -B1 /");
@@ -88,7 +88,7 @@ async function handleStatus(msg) {
         const usedDisk = parseInt(diskArr[2]);
         const diskPct = parseFloat(diskArr[4]).toFixed(1);
         const diskBar = makeBar(diskPct);
-        const diskStr = `└ Disk ${diskBar} ${diskPct.padStart(5, ' ')}% | ${String((usedDisk / 1073741824).toFixed(1)).padStart(5, '0')}/${String((totalDisk / 1073741824).toFixed(1)).padStart(5, '0')}GB`;
+        const diskStr = `└ Disk ${diskBar} ${diskPct.padStart(5, ' ')}% | ${String((usedDisk / 1073741824).toFixed(1)).padStart(5, ' ')}/${String((totalDisk / 1073741824).toFixed(1)).padStart(5, ' ')}GB`;
 
         let cpuUsageStr = "N/A";
         try {
@@ -111,7 +111,7 @@ async function handleStatus(msg) {
             const isCharging = batJson.status === 'CHARGING' || batJson.plugged !== 'UNPLUGGED';
             const chargeText = isCharging ? '(Charging)' : '(Not Charging)';
             batStr = `${batJson.percentage}% ${chargeText}`;
-            genTempStr = `${String(batJson.temperature.toFixed(1)).padStart(5, '0')}°C`;
+            genTempStr = `${String(batJson.temperature.toFixed(1)).padStart(5, ' ')}°C`;
         } catch (e) { }
 
         let cpuTempStr = "";
