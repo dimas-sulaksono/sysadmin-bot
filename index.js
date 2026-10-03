@@ -14,7 +14,8 @@ bot.setMyCommands([
     { command: 'logs', description: 'Ambil Log Servis' },
     { command: 'deploy', description: 'Manual Deploy / Update' },
     { command: 'network', description: 'Cek Status Jaringan' },
-    { command: 'speedtest', description: 'Uji Kecepatan Internet' }
+    { command: 'speedtest', description: 'Uji Kecepatan Internet' },
+    { command: 'backup', description: 'Backup Konfigurasi Sistem ke Telegram' }
 ]);
 
 const runCmd = (cmd, timeout = 5000) => new Promise((resolve) => {
@@ -29,7 +30,7 @@ const menuKeyboard = {
             [{ text: '📊 Dasbor Utama' }],
             [{ text: '🔄 Restart Servis' }, { text: '📜 Ambil Log' }],
             [{ text: '🚀 Manual Deploy' }, { text: '🕸️ Jaringan' }],
-            [{ text: '⚡ Speedtest' }]
+            [{ text: '⚡ Speedtest' }, { text: '📦 Backup Config' }]
         ],
         resize_keyboard: true,
         is_persistent: true
@@ -84,6 +85,29 @@ async function handleSpeedtest(msg) {
     bot.sendMessage(chatId, '⚡ *Memulai Speedtest...* (Estimasi 30-40 detik)', { parse_mode: 'Markdown' });
     const out = await runCmd("curl -s https://raw.githubusercontent.com/sivel/speedtest-cli/master/speedtest.py | python3 - --simple", 60000);
     bot.sendMessage(chatId, `=== Hasil Speedtest ===\n\`\`\`text\n${out.trim()}\n\`\`\``, { parse_mode: 'Markdown' });
+}
+
+async function handleBackup(msg) {
+    if (msg.chat.id.toString() !== chatId) return;
+    bot.sendMessage(chatId, '📦 *Mempersiapkan Backup...*', { parse_mode: 'Markdown' });
+    const backupCmd = `tar -czvf /tmp/vps-backup-$(date +%Y%m%d).tar.gz /root/sysadmin-bot/.env /root/.pm2/dump.pm2 /root/scripts /etc/init-portfolio.sh 2>/dev/null || true`;
+    
+    try {
+        await runCmd(backupCmd, 10000);
+        const filenameOut = await runCmd("ls /tmp/vps-backup-*.tar.gz | head -n 1");
+        const filename = filenameOut.trim();
+        if (filename) {
+            await bot.sendDocument(chatId, filename, { 
+                caption: '🛡️ *Backup VPS Berhasil!*\n\nFile ini berisi kredensial `.env`, tabel servis PM2, dan skrip *custom* Anda. Simpan dengan aman!', 
+                parse_mode: 'Markdown' 
+            });
+            await runCmd(`rm -f ${filename}`);
+        } else {
+            bot.sendMessage(chatId, '❌ Gagal membuat file backup.');
+        }
+    } catch(e) {
+        bot.sendMessage(chatId, '❌ Terjadi kesalahan saat memproses backup.');
+    }
 }
 
 async function handleStatus(msg) {
@@ -258,6 +282,7 @@ bot.onText(/\/logs/, handleFetchLogsMenu);
 bot.onText(/\/deploy/, handleDeploy);
 bot.onText(/\/network/, handleNetwork);
 bot.onText(/\/speedtest/, handleSpeedtest);
+bot.onText(/\/backup/, handleBackup);
 
 // Text buttons
 bot.on('message', (msg) => {
@@ -267,6 +292,7 @@ bot.on('message', (msg) => {
     if (msg.text === '🚀 Manual Deploy') handleDeploy(msg);
     if (msg.text === '🕸️ Jaringan') handleNetwork(msg);
     if (msg.text === '⚡ Speedtest') handleSpeedtest(msg);
+    if (msg.text === '📦 Backup Config') handleBackup(msg);
 });
 
 bot.onText(/\/start/, (msg) => {
