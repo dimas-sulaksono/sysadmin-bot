@@ -63,17 +63,15 @@ async function handleStatus(msg) {
         const totalRam = parseInt(mem[1]);
         const usedRam = totalRam - parseInt(mem[6]);
         const ramPct = ((usedRam / totalRam) * 100).toFixed(1);
-        const ramSisa = (parseInt(mem[6]) / 1073741824).toFixed(1);
-        const ramStr = `${(usedRam / 1073741824).toFixed(1)}Gi / ${(totalRam / 1073741824).toFixed(1)}Gi (${ramPct}%) [Sisa: ${ramSisa}Gi]`;
+        const ramStr = `${ramPct}% ${String((usedRam / 1073741824).toFixed(1)).padStart(5, '0')}/${String((totalRam / 1073741824).toFixed(1)).padStart(5, '0')}GB`;
         
         let swapStr = 'N/A';
         if (freeLines.length > 2 && freeLines[2].startsWith('Swap:')) {
             const swapArr = freeLines[2].split(/\s+/);
             const totalSwap = parseInt(swapArr[1]);
             const usedSwap = parseInt(swapArr[2]);
-            const freeSwap = parseInt(swapArr[3]);
-            const swapPct = totalSwap > 0 ? ((usedSwap / totalSwap) * 100).toFixed(1) : 0;
-            swapStr = `${(usedSwap / 1073741824).toFixed(1)}Gi / ${(totalSwap / 1073741824).toFixed(1)}Gi (${swapPct}%) [Sisa: ${(freeSwap / 1073741824).toFixed(1)}Gi]`;
+            const swapPct = totalSwap > 0 ? ((usedSwap / totalSwap) * 100).toFixed(1) : "0.0";
+            swapStr = `${swapPct}% ${String((usedSwap / 1073741824).toFixed(1)).padStart(5, '0')}/${String((totalSwap / 1073741824).toFixed(1)).padStart(5, '0')}GB`;
         }
 
         const dfOut = await runCmd("df -B1 /");
@@ -81,19 +79,17 @@ async function handleStatus(msg) {
         const diskArr = dfLines[dfLines.length - 1].split(/\s+/);
         const totalDisk = parseInt(diskArr[1]);
         const usedDisk = parseInt(diskArr[2]);
-        const availDisk = parseInt(diskArr[3]);
-        const diskStr = `${(usedDisk / 1073741824).toFixed(1)}GB terpakai / ${(totalDisk / 1073741824).toFixed(1)}GB (${diskArr[4]}) [Sisa: ${(availDisk / 1073741824).toFixed(1)}GB]`;
+        const diskPct = diskArr[4]; // e.g. "24%"
+        const diskStr = `${parseFloat(diskPct).toFixed(1)}% ${String((usedDisk / 1073741824).toFixed(1)).padStart(5, '0')}/${String((totalDisk / 1073741824).toFixed(1)).padStart(5, '0')}GB`;
 
         let cpuUsageStr = "N/A";
         try {
-            // Mengambil metrik %CPU dari seluruh proses Termux (karena /proc/stat global diblokir oleh Android 8+ Security)
             const psOut = await runCmd("ssh -o StrictHostKeyChecking=no -p 8022 127.0.0.1 'ps -A -o %cpu'");
             let sum = 0;
             psOut.trim().split('\n').forEach(line => {
                 const val = parseFloat(line.trim());
                 if (!isNaN(val)) sum += val;
             });
-            // Karena ini CPU 8-Core (800% max), kita bagi 8 agar menjadi format 100%
             const overallPct = (sum / 8).toFixed(1);
             cpuUsageStr = `${overallPct}%`;
         } catch(e) {}
@@ -104,9 +100,9 @@ async function handleStatus(msg) {
             const termuxBatOut = await runCmd("ssh -o StrictHostKeyChecking=no -p 8022 127.0.0.1 'termux-battery-status'", 3000);
             const batJson = JSON.parse(termuxBatOut);
             const isCharging = batJson.status === 'CHARGING' || batJson.plugged !== 'UNPLUGGED';
-            const chargeText = isCharging ? '(Sedang Mengecas)' : '(Tidak Mengecas)';
+            const chargeText = isCharging ? '(Charging)' : '(Not Charging)';
             batStr = `${batJson.percentage}% ${chargeText}`;
-            genTempStr = `${batJson.temperature}°C`;
+            genTempStr = `${String(batJson.temperature.toFixed(1)).padStart(5, '0')}°C`;
         } catch (e) { }
 
         let cpuTempStr = "";
@@ -140,13 +136,14 @@ async function handleStatus(msg) {
             list.forEach(app => {
                 const isOnline = app.pm2_env.status === 'online';
                 const statusIcon = isOnline ? '🟢' : '🔴';
-                let usage = isOnline ? '' : '[stopped]';
+                let usage = isOnline ? '' : 'stopped';
                 if (isOnline && app.monit) {
                     const memMB = (app.monit.memory / 1024 / 1024).toFixed(1) + 'MB';
                     const cpu = app.monit.cpu + '%';
-                    usage = `[${cpu} | ${memMB}]`;
+                    usage = `${cpu} | ${memMB}`;
                 }
-                servicesStr += `${statusIcon} \`${app.name}\` ${usage}\n`;
+                const namePadded = app.name.padEnd(20, ' ');
+                servicesStr += `${statusIcon} ${namePadded} ${usage}\n`;
             });
         } catch (e) { }
 
@@ -154,14 +151,14 @@ async function handleStatus(msg) {
 ⏱ Uptime: ${uptimeStr}
 
 📊 *Resource Usage*
-├ 🚀 *CPU Usage:* ${cpuUsageStr}
-├ 💾 *RAM:* ${ramStr}
-├ 💽 *Swap:* ${swapStr}
-└ 💿 *Disk:* ${diskStr}
+├ CPU    ${cpuUsageStr}
+├ RAM   ${ramStr}
+├ Swap  ${swapStr}
+└ Disk    ${diskStr}
 
 📱 *Device Health*
-├ 🔋 *Baterai:* ${batStr}
-└ 🌡 *Suhu:* ${genTempStr}
+├ Baterai ${batStr}
+└ Suhu      ${genTempStr}
 
 🔥 *CPU Temps (°C)*
 \`\`\`text
