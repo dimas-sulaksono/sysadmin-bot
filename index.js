@@ -94,7 +94,7 @@ async function handleStatus(msg) {
         try {
             const psOut = await runCmd("ssh -o StrictHostKeyChecking=no -p 8022 127.0.0.1 'ps -A -o %cpu'");
             let sum = 0;
-            psOut.trim().split('\n ').forEach(line => {
+            psOut.trim().split('\n').forEach(line => {
                 const val = parseFloat(line.trim());
                 if (!isNaN(val)) sum += val;
             });
@@ -171,7 +171,7 @@ ${diskStr}
 📱 *Device Health*
 \`\`\`text
 ├ Baterai ${batStr}
-└ Suhu      ${genTempStr}
+└ Suhu    ${genTempStr}
 \`\`\`
 
 🔥 *CPU Temps (°C)*
