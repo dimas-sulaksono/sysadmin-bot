@@ -31,8 +31,8 @@ const menuKeyboard = {
             [{ text: '📊 Dasbor Utama' }],
             [{ text: '🔄 Restart Servis' }, { text: '📜 Ambil Log' }],
             [{ text: '🚀 Manual Deploy' }, { text: '🕸️ Jaringan' }],
-            [{ text: '⚡ Speedtest' }, { text: '📦 Backup Config' }],
-            [{ text: '🗄️ Backup DB' }]
+            [{ text: '📦 Backup Config' }, { text: '🗄️ Backup DB' }],
+            [{ text: '⚡ Speedtest' }]
         ],
         resize_keyboard: true,
         is_persistent: true
