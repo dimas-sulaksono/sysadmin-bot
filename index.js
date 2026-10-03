@@ -70,7 +70,7 @@ async function handleStatus(msg) {
         const ramPct = ((usedRam / totalRam) * 100).toFixed(1);
         const ramBar = makeBar(ramPct);
         const ramStr = `├ RAM  ${ramBar} ${ramPct.padStart(5, ' ')}% | ${String((usedRam / 1073741824).toFixed(1)).padStart(5, '0')}/${String((totalRam / 1073741824).toFixed(1)).padStart(5, '0')}GB`;
-        
+
         let swapStr = '├ Swap N/A';
         if (freeLines.length > 2 && freeLines[2].startsWith('Swap:')) {
             const swapArr = freeLines[2].split(/\s+/);
@@ -101,7 +101,7 @@ async function handleStatus(msg) {
             const overallPct = (sum / 8).toFixed(1);
             const cpuBar = makeBar(overallPct);
             cpuUsageStr = `├ CPU  ${cpuBar} ${overallPct.padStart(5, ' ')}%`;
-        } catch(e) {}
+        } catch (e) { }
 
         let batStr = 'N/A';
         let genTempStr = 'N/A';
@@ -157,7 +157,7 @@ async function handleStatus(msg) {
             });
         } catch (e) { }
 
-        const finalMsg = `🖥 *VPS SYSTEM MONITOR* 
+        const finalMsg = `*VPS SYSTEM MONITOR* 
 ⏱ Uptime: ${uptimeStr}
 
 📊 *Resource Usage*
