@@ -57,20 +57,49 @@ async function handleStatus(msg) {
             if (upMatch) uptimeStr = upMatch[1];
         } catch (e) { }
 
-        const freeOut = await runCmd("free -h");
+        const freeOut = await runCmd("free -b");
         const freeLines = freeOut.trim().split('\n');
         const mem = freeLines[1].split(/\s+/);
-        const ramStr = `${mem[2]} / ${mem[1]}`;
+        const totalRam = parseInt(mem[1]);
+        const usedRam = totalRam - parseInt(mem[6]);
+        const ramPct = ((usedRam / totalRam) * 100).toFixed(1);
+        const ramSisa = (parseInt(mem[6]) / 1073741824).toFixed(1);
+        const ramStr = `${(usedRam / 1073741824).toFixed(1)}Gi / ${(totalRam / 1073741824).toFixed(1)}Gi (${ramPct}%) [Sisa: ${ramSisa}Gi]`;
+        
         let swapStr = 'N/A';
         if (freeLines.length > 2 && freeLines[2].startsWith('Swap:')) {
             const swapArr = freeLines[2].split(/\s+/);
-            if (swapArr.length >= 3) swapStr = `${swapArr[2]} / ${swapArr[1]}`;
+            const totalSwap = parseInt(swapArr[1]);
+            const usedSwap = parseInt(swapArr[2]);
+            const freeSwap = parseInt(swapArr[3]);
+            const swapPct = totalSwap > 0 ? ((usedSwap / totalSwap) * 100).toFixed(1) : 0;
+            swapStr = `${(usedSwap / 1073741824).toFixed(1)}Gi / ${(totalSwap / 1073741824).toFixed(1)}Gi (${swapPct}%) [Sisa: ${(freeSwap / 1073741824).toFixed(1)}Gi]`;
         }
 
-        const dfOut = await runCmd("df -h /");
+        const dfOut = await runCmd("df -B1 /");
         const dfLines = dfOut.trim().split('\n');
         const diskArr = dfLines[dfLines.length - 1].split(/\s+/);
-        const diskStr = `${diskArr[3]} Sisa (${diskArr[4]} terpakai)`;
+        const totalDisk = parseInt(diskArr[1]);
+        const usedDisk = parseInt(diskArr[2]);
+        const availDisk = parseInt(diskArr[3]);
+        const diskStr = `${(usedDisk / 1073741824).toFixed(1)}GB terpakai / ${(totalDisk / 1073741824).toFixed(1)}GB (${diskArr[4]}) [Sisa: ${(availDisk / 1073741824).toFixed(1)}GB]`;
+
+        let cpuUsageStr = "N/A";
+        try {
+            const stat1 = await runCmd("cat /proc/stat | grep '^cpu '");
+            await new Promise(r => setTimeout(r, 500));
+            const stat2 = await runCmd("cat /proc/stat | grep '^cpu '");
+            const getVars = (line) => {
+                const p = line.split(/\s+/);
+                const idle = parseInt(p[4]);
+                const total = parseInt(p[1]) + parseInt(p[2]) + parseInt(p[3]) + idle + parseInt(p[5]) + parseInt(p[6]) + parseInt(p[7]);
+                return { idle, total };
+            };
+            const s1 = getVars(stat1);
+            const s2 = getVars(stat2);
+            const cpuPct = (((s2.total - s1.total) - (s2.idle - s1.idle)) / (s2.total - s1.total) * 100).toFixed(1);
+            cpuUsageStr = `${cpuPct}%`;
+        } catch(e) {}
 
         let batStr = 'N/A';
         let genTempStr = 'N/A';
@@ -128,6 +157,7 @@ async function handleStatus(msg) {
 ⏱ Uptime: ${uptimeStr}
 
 📊 *Resource Usage*
+├ 🚀 *CPU Usage:* ${cpuUsageStr}
 ├ 💾 *RAM:* ${ramStr}
 ├ 💽 *Swap:* ${swapStr}
 └ 💿 *Disk:* ${diskStr}
