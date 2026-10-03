@@ -15,7 +15,8 @@ bot.setMyCommands([
     { command: 'deploy', description: 'Manual Deploy / Update' },
     { command: 'network', description: 'Cek Status Jaringan' },
     { command: 'speedtest', description: 'Uji Kecepatan Internet' },
-    { command: 'backup', description: 'Backup Konfigurasi Sistem ke Telegram' }
+    { command: 'backup', description: 'Backup Konfigurasi Sistem ke Telegram' },
+    { command: 'dbbackup', description: 'Backup Database MySQL' }
 ]);
 
 const runCmd = (cmd, timeout = 5000) => new Promise((resolve) => {
@@ -30,7 +31,8 @@ const menuKeyboard = {
             [{ text: '📊 Dasbor Utama' }],
             [{ text: '🔄 Restart Servis' }, { text: '📜 Ambil Log' }],
             [{ text: '🚀 Manual Deploy' }, { text: '🕸️ Jaringan' }],
-            [{ text: '⚡ Speedtest' }, { text: '📦 Backup Config' }]
+            [{ text: '⚡ Speedtest' }, { text: '📦 Backup Config' }],
+            [{ text: '🗄️ Backup DB' }]
         ],
         resize_keyboard: true,
         is_persistent: true
@@ -107,6 +109,36 @@ async function handleBackup(msg) {
         }
     } catch(e) {
         bot.sendMessage(chatId, '❌ Terjadi kesalahan saat memproses backup.');
+    }
+}
+
+async function handleDbBackupMenu(msg) {
+    if (msg.chat.id.toString() !== chatId) return;
+    try {
+        const out = await runCmd("mysql -u sysadmin -pAquosBackup123\\! -e 'SHOW DATABASES;' | grep -Ev '^(Database|information_schema|performance_schema|mysql|sys)$'");
+        const dbs = out.trim().split('\n').filter(db => db.length > 0);
+        
+        if (dbs.length === 0) {
+            bot.sendMessage(chatId, '❌ Tidak ditemukan database custom.');
+            return;
+        }
+
+        // Susun inline keyboard: 1 baris maksimal 2 tombol
+        const buttons = [];
+        for (let i = 0; i < dbs.length; i += 2) {
+            const row = [{ text: `💾 ${dbs[i]}`, callback_data: `dump_${dbs[i]}` }];
+            if (i + 1 < dbs.length) {
+                row.push({ text: `💾 ${dbs[i+1]}`, callback_data: `dump_${dbs[i+1]}` });
+            }
+            buttons.push(row);
+        }
+
+        bot.sendMessage(chatId, '🗄️ Pilih *Database* yang ingin di-*backup*:', {
+            parse_mode: 'Markdown',
+            reply_markup: { inline_keyboard: buttons }
+        });
+    } catch (e) {
+        bot.sendMessage(chatId, '❌ Gagal mengambil daftar database.');
     }
 }
 
@@ -273,6 +305,28 @@ bot.on('callback_query', async (query) => {
         const logs = await runCmd(`pm2 logs ${app} --lines 15 --nostream`);
         bot.editMessageText(`📜 *Logs: ${app}*\n\`\`\`text\n${logs.substring(0, 3900)}\n\`\`\``, { chat_id: chatId, message_id: query.message.message_id, parse_mode: 'Markdown' });
     }
+
+    if (action.startsWith('dump_')) {
+        const dbName = action.replace('dump_', '');
+        bot.answerCallbackQuery(query.id, { text: `Mengekstrak ${dbName}...` });
+        bot.editMessageText(`🗄️ *Mengekstrak database:* \`${dbName}\`...`, { chat_id: chatId, message_id: query.message.message_id, parse_mode: 'Markdown' });
+        
+        const backupFile = `/tmp/${dbName}-backup-$(date +%Y%m%d%H%M).sql.gz`;
+        await runCmd(`mysqldump -u sysadmin -pAquosBackup123\\! ${dbName} 2>/dev/null | gzip > ${backupFile}`, 30000);
+        const filenameOut = await runCmd(`ls ${backupFile} | head -n 1`);
+        const filename = filenameOut.trim();
+        
+        if (filename && filename.endsWith('.gz')) {
+            await bot.sendDocument(chatId, filename, { 
+                caption: `🗄️ *Backup Database Berhasil!*\n\nDatabase: \`${dbName}\`\nKompresi: \`GZIP\``, 
+                parse_mode: 'Markdown' 
+            });
+            await runCmd(`rm -f ${filename}`);
+            bot.editMessageText(`✅ *Backup Selesai:* \`${dbName}\``, { chat_id: chatId, message_id: query.message.message_id, parse_mode: 'Markdown' });
+        } else {
+            bot.editMessageText(`❌ *Gagal mengekstrak:* \`${dbName}\``, { chat_id: chatId, message_id: query.message.message_id, parse_mode: 'Markdown' });
+        }
+    }
 });
 
 // Commands
@@ -283,6 +337,7 @@ bot.onText(/\/deploy/, handleDeploy);
 bot.onText(/\/network/, handleNetwork);
 bot.onText(/\/speedtest/, handleSpeedtest);
 bot.onText(/\/backup/, handleBackup);
+bot.onText(/\/dbbackup/, handleDbBackupMenu);
 
 // Text buttons
 bot.on('message', (msg) => {
@@ -293,6 +348,7 @@ bot.on('message', (msg) => {
     if (msg.text === '🕸️ Jaringan') handleNetwork(msg);
     if (msg.text === '⚡ Speedtest') handleSpeedtest(msg);
     if (msg.text === '📦 Backup Config') handleBackup(msg);
+    if (msg.text === '🗄️ Backup DB') handleDbBackupMenu(msg);
 });
 
 bot.onText(/\/start/, (msg) => {
