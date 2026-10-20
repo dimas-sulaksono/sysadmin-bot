@@ -14,6 +14,7 @@ bot.setMyCommands([
     { command: 'logs', description: 'Ambil Log Servis' },
     { command: 'deploy', description: 'Manual Deploy / Update' },
     { command: 'network', description: 'Cek Status Jaringan' },
+    { command: 'tailscale', description: 'Kontrol / Hidupkan Tailscale VPN' },
     { command: 'speedtest', description: 'Uji Kecepatan Internet' },
     { command: 'backup', description: 'Backup Konfigurasi Sistem ke Telegram' },
     { command: 'dbbackup', description: 'Backup Database MySQL' }
@@ -32,7 +33,7 @@ const menuKeyboard = {
             [{ text: '🔄 Restart Servis' }, { text: '📜 Ambil Log' }],
             [{ text: '🚀 Manual Deploy' }, { text: '🕸️ Jaringan' }],
             [{ text: '📦 Backup Config' }, { text: '🗄️ Backup DB' }],
-            [{ text: '⚡ Speedtest' }]
+            [{ text: '⚡ Speedtest' }, { text: '🛡️ Tailscale' }]
         ],
         resize_keyboard: true,
         is_persistent: true
@@ -73,13 +74,93 @@ async function handleDeploy(msg) {
     bot.sendMessage(chatId, `\`\`\`text\n${out.substring(0, 3900)}\n\`\`\``, { parse_mode: 'Markdown' });
 }
 
+async function getTailscaleInfo() {
+    let isDaemonRunning = false;
+    let isConnected = false;
+    let ip = "N/A";
+    let statusText = "Mati";
+    let statusRaw = "";
+
+    try {
+        const pgrep = await runCmd("pgrep tailscaled");
+        isDaemonRunning = pgrep.trim().length > 0;
+    } catch (e) {}
+
+    if (isDaemonRunning) {
+        try {
+            statusRaw = await runCmd("tailscale status", 5000);
+            if (statusRaw && !statusRaw.toLowerCase().includes("tailscale is stopped") && !statusRaw.toLowerCase().includes("logged out")) {
+                isConnected = true;
+                statusText = "🟢 Aktif / Terhubung";
+                const ipOut = await runCmd("tailscale ip -4", 3000);
+                ip = ipOut.trim().split('\n')[0] || "N/A";
+            } else {
+                statusText = "🟡 Daemon Jalan (Status: Stopped)";
+            }
+        } catch (e) {
+            statusText = "⚠️ Error membaca status";
+        }
+    } else {
+        statusText = "🔴 Mati (Daemon tailscaled tidak berjalan)";
+    }
+
+    return { isDaemonRunning, isConnected, ip, statusText, statusRaw };
+}
+
+async function handleTailscaleMenu(msg, editMessageId = null) {
+    const targetChatId = (msg && msg.chat) ? msg.chat.id.toString() : chatId;
+    if (targetChatId !== chatId) return;
+
+    const info = await getTailscaleInfo();
+
+    const text = `🛡️ *KONTROL TAILSCALE VPN (JARAK JAUH)*
+
+📡 *Status:* ${info.statusText}
+🌐 *IP VPN:* \`${info.ip}\`
+⚙️ *Daemon:* ${info.isDaemonRunning ? '🟢 Running' : '🔴 Inactive'}
+
+Pilih menu di bawah untuk mengontrol koneksi:`;
+
+    const reply_markup = {
+        inline_keyboard: [
+            [
+                { text: '🟢 Hidupkan (Up)', callback_data: 'ts_up' },
+                { text: '🔴 Matikan (Down)', callback_data: 'ts_down' }
+            ],
+            [
+                { text: '🔄 Restart Service', callback_data: 'ts_restart' },
+                { text: '📱 Buka App Android', callback_data: 'ts_app' }
+            ],
+            [
+                { text: '👥 List Perangkat (Peers)', callback_data: 'ts_peers' },
+                { text: '🔄 Refresh Status', callback_data: 'ts_refresh' }
+            ]
+        ]
+    };
+
+    if (editMessageId) {
+        try {
+            await bot.editMessageText(text, { chat_id: chatId, message_id: editMessageId, parse_mode: 'Markdown', reply_markup });
+        } catch (e) { }
+    } else {
+        bot.sendMessage(chatId, text, { parse_mode: 'Markdown', reply_markup });
+    }
+}
+
 async function handleNetwork(msg) {
     if (msg.chat.id.toString() !== chatId) return;
     bot.sendMessage(chatId, '🕸️ *Mengecek Jaringan...*', { parse_mode: 'Markdown' });
     const tailscale = await runCmd("tailscale status");
     const ping = await runCmd("curl -I -s https://api.telegram.org -m 3 | head -n 1");
     const out = `=== Tailscale ===\n${tailscale.trim()}\n\n=== Ping Telegram API ===\n${ping.trim()}`;
-    bot.sendMessage(chatId, `\`\`\`text\n${out.substring(0, 3900)}\n\`\`\``, { parse_mode: 'Markdown' });
+    bot.sendMessage(chatId, `\`\`\`text\n${out.substring(0, 3900)}\n\`\`\``, {
+        parse_mode: 'Markdown',
+        reply_markup: {
+            inline_keyboard: [
+                [{ text: '🛡️ Kelola Tailscale', callback_data: 'open_ts_menu' }]
+            ]
+        }
+    });
 }
 
 async function handleSpeedtest(msg) {
@@ -327,6 +408,95 @@ bot.on('callback_query', async (query) => {
             bot.editMessageText(`❌ *Gagal mengekstrak:* \`${dbName}\``, { chat_id: chatId, message_id: query.message.message_id, parse_mode: 'Markdown' });
         }
     }
+
+    if (action === 'open_ts_menu') {
+        bot.answerCallbackQuery(query.id);
+        handleTailscaleMenu(query.message);
+    }
+
+    if (action === 'ts_up') {
+        bot.answerCallbackQuery(query.id, { text: 'Menghidupkan Tailscale...' });
+        bot.editMessageText('🚀 *Menghidupkan Tailscale...*\nMemeriksa daemon dan mengaktifkan VPN...', {
+            chat_id: chatId,
+            message_id: query.message.message_id,
+            parse_mode: 'Markdown'
+        });
+
+        const daemonCheck = await runCmd("pgrep tailscaled");
+        if (!daemonCheck.trim()) {
+            await runCmd("nohup tailscaled --tun=userspace-networking --socks5-server=localhost:1055 > /var/log/tailscaled.log 2>&1 &");
+            await new Promise(r => setTimeout(r, 2000));
+        }
+
+        const upOut = await runCmd("tailscale up --ssh 2>&1 || tailscale up 2>&1", 15000);
+        const ipOut = await runCmd("tailscale ip -4", 3000);
+        const currentIp = ipOut.trim().split('\n')[0] || "N/A";
+
+        bot.sendMessage(chatId, `✅ *Tailscale Berhasil Dihidupkan!*\n🌐 *IP:* \`${currentIp}\`\n\n\`\`\`text\n${upOut.trim() || 'Tailscale is now online'}\n\`\`\``, {
+            parse_mode: 'Markdown'
+        });
+        setTimeout(() => handleTailscaleMenu(null), 1000);
+    }
+
+    if (action === 'ts_down') {
+        bot.answerCallbackQuery(query.id, { text: 'Mematikan Tailscale...' });
+        bot.editMessageText('⚠️ *Mematikan koneksi Tailscale...*', {
+            chat_id: chatId,
+            message_id: query.message.message_id,
+            parse_mode: 'Markdown'
+        });
+
+        const downOut = await runCmd("tailscale down 2>&1", 10000);
+        bot.sendMessage(chatId, `🔴 *Tailscale Berhasil Dimatikan*\n\`\`\`text\n${downOut.trim() || 'Tailscale is stopped.'}\n\`\`\``, {
+            parse_mode: 'Markdown'
+        });
+        setTimeout(() => handleTailscaleMenu(null), 1000);
+    }
+
+    if (action === 'ts_restart') {
+        bot.answerCallbackQuery(query.id, { text: 'Mereset Tailscale...' });
+        bot.editMessageText('🔄 *Mereset Daemon & Koneksi Tailscale...*', {
+            chat_id: chatId,
+            message_id: query.message.message_id,
+            parse_mode: 'Markdown'
+        });
+
+        await runCmd("tailscale down 2>&1 || true");
+        await runCmd("pkill tailscaled 2>&1 || true");
+        await new Promise(r => setTimeout(r, 1500));
+        await runCmd("nohup tailscaled --tun=userspace-networking --socks5-server=localhost:1055 > /var/log/tailscaled.log 2>&1 &");
+        await new Promise(r => setTimeout(r, 2000));
+        const upRes = await runCmd("tailscale up --ssh 2>&1 || tailscale up 2>&1", 15000);
+        const newIp = (await runCmd("tailscale ip -4", 3000)).trim().split('\n')[0] || "N/A";
+
+        bot.sendMessage(chatId, `✅ *Tailscale Berhasil Direstart!*\n🌐 *IP Baru:* \`${newIp}\`\n\n\`\`\`text\n${upRes.trim() || 'Tailscale running cleanly'}\n\`\`\``, {
+            parse_mode: 'Markdown'
+        });
+        setTimeout(() => handleTailscaleMenu(null), 1000);
+    }
+
+    if (action === 'ts_app') {
+        bot.answerCallbackQuery(query.id, { text: 'Membuka Tailscale di Android...' });
+        try {
+            await runCmd("ssh -o StrictHostKeyChecking=no -p 8022 127.0.0.1 '/system/bin/am start -n com.tailscale.ipn/.MainActivity 2>/dev/null || true'");
+            bot.sendMessage(chatId, '📱 *Perintah Terkirim!* Membuka aplikasi Tailscale Android di layar HP.', { parse_mode: 'Markdown' });
+        } catch (e) {
+            bot.sendMessage(chatId, '❌ Gagal mengirim perintah ke Android Termux.', { parse_mode: 'Markdown' });
+        }
+    }
+
+    if (action === 'ts_peers') {
+        bot.answerCallbackQuery(query.id, { text: 'Mengambil daftar peers...' });
+        const peers = await runCmd("tailscale status", 10000);
+        bot.sendMessage(chatId, `👥 *Daftar Perangkat Tailscale*\n\`\`\`text\n${peers.trim().substring(0, 3900)}\n\`\`\``, {
+            parse_mode: 'Markdown'
+        });
+    }
+
+    if (action === 'ts_refresh') {
+        bot.answerCallbackQuery(query.id, { text: 'Memperbarui status...' });
+        await handleTailscaleMenu(null, query.message.message_id);
+    }
 });
 
 // Commands
@@ -335,6 +505,7 @@ bot.onText(/\/restart/, handleRestartMenu);
 bot.onText(/\/logs/, handleFetchLogsMenu);
 bot.onText(/\/deploy/, handleDeploy);
 bot.onText(/\/network/, handleNetwork);
+bot.onText(/\/tailscale/, (msg) => handleTailscaleMenu(msg));
 bot.onText(/\/speedtest/, handleSpeedtest);
 bot.onText(/\/backup/, handleBackup);
 bot.onText(/\/dbbackup/, handleDbBackupMenu);
@@ -346,6 +517,7 @@ bot.on('message', (msg) => {
     if (msg.text === '📜 Ambil Log') handleFetchLogsMenu(msg);
     if (msg.text === '🚀 Manual Deploy') handleDeploy(msg);
     if (msg.text === '🕸️ Jaringan') handleNetwork(msg);
+    if (msg.text === '🛡️ Tailscale') handleTailscaleMenu(msg);
     if (msg.text === '⚡ Speedtest') handleSpeedtest(msg);
     if (msg.text === '📦 Backup Config') handleBackup(msg);
     if (msg.text === '🗄️ Backup DB') handleDbBackupMenu(msg);
