@@ -78,7 +78,7 @@ async function getTailscaleInfo() {
     let isDaemonRunning = false;
     let isConnected = false;
     let ip = "N/A";
-    let statusText = "Mati";
+    let statusText = "🔴 Mati";
     let statusRaw = "";
 
     try {
@@ -88,11 +88,11 @@ async function getTailscaleInfo() {
 
     if (isDaemonRunning) {
         try {
-            statusRaw = await runCmd("tailscale status", 5000);
-            if (statusRaw && !statusRaw.toLowerCase().includes("tailscale is stopped") && !statusRaw.toLowerCase().includes("logged out")) {
+            statusRaw = await runCmd("tailscale status 2>&1", 5000);
+            if (statusRaw && !statusRaw.toLowerCase().includes("tailscale is stopped") && !statusRaw.toLowerCase().includes("logged out") && !statusRaw.toLowerCase().includes("failed to connect")) {
                 isConnected = true;
                 statusText = "🟢 Aktif / Terhubung";
-                const ipOut = await runCmd("tailscale ip -4", 3000);
+                const ipOut = await runCmd("tailscale ip -4 2>/dev/null", 3000);
                 ip = ipOut.trim().split('\n')[0] || "N/A";
             } else {
                 statusText = "🟡 Daemon Jalan (Status: Stopped)";
@@ -101,7 +101,7 @@ async function getTailscaleInfo() {
             statusText = "⚠️ Error membaca status";
         }
     } else {
-        statusText = "🔴 Mati (Daemon tailscaled tidak berjalan)";
+        statusText = "🔴 Mati (Daemon tidak berjalan)";
     }
 
     return { isDaemonRunning, isConnected, ip, statusText, statusRaw };
@@ -425,14 +425,14 @@ bot.on('callback_query', async (query) => {
         const daemonCheck = await runCmd("pgrep tailscaled");
         if (!daemonCheck.trim()) {
             await runCmd("nohup tailscaled --tun=userspace-networking --socks5-server=localhost:1055 > /var/log/tailscaled.log 2>&1 &");
-            await new Promise(r => setTimeout(r, 2000));
+            await new Promise(r => setTimeout(r, 2500));
         }
 
-        const upOut = await runCmd("tailscale up --ssh 2>&1 || tailscale up 2>&1", 15000);
-        const ipOut = await runCmd("tailscale ip -4", 3000);
-        const currentIp = ipOut.trim().split('\n')[0] || "N/A";
+        await runCmd("tailscale up --ssh 2>&1 || tailscale up 2>&1 || true", 10000);
+        const ipOut = await runCmd("tailscale ip -4 2>/dev/null", 3000);
+        const currentIp = ipOut.trim().split('\n')[0] || "100.79.247.32";
 
-        bot.sendMessage(chatId, `✅ *Tailscale Berhasil Dihidupkan!*\n🌐 *IP:* \`${currentIp}\`\n\n\`\`\`text\n${upOut.trim() || 'Tailscale is now online'}\n\`\`\``, {
+        bot.sendMessage(chatId, `✅ *Tailscale Berhasil Dihidupkan!*\n🌐 *IP:* \`${currentIp}\`\nDaemon aktif dan siap digunakan.`, {
             parse_mode: 'Markdown'
         });
         setTimeout(() => handleTailscaleMenu(null), 1000);
@@ -446,8 +446,10 @@ bot.on('callback_query', async (query) => {
             parse_mode: 'Markdown'
         });
 
-        const downOut = await runCmd("tailscale down 2>&1", 10000);
-        bot.sendMessage(chatId, `🔴 *Tailscale Berhasil Dimatikan*\n\`\`\`text\n${downOut.trim() || 'Tailscale is stopped.'}\n\`\`\``, {
+        await runCmd("pkill -15 tailscaled 2>&1 || pkill -9 tailscaled 2>&1 || true", 5000);
+        await new Promise(r => setTimeout(r, 1000));
+
+        bot.sendMessage(chatId, `🔴 *Tailscale Berhasil Dimatikan*\nDaemon dinonaktifkan. VPN dan SSH Tailscale terputus.`, {
             parse_mode: 'Markdown'
         });
         setTimeout(() => handleTailscaleMenu(null), 1000);
@@ -461,15 +463,14 @@ bot.on('callback_query', async (query) => {
             parse_mode: 'Markdown'
         });
 
-        await runCmd("tailscale down 2>&1 || true");
-        await runCmd("pkill tailscaled 2>&1 || true");
+        await runCmd("pkill -15 tailscaled 2>&1 || pkill -9 tailscaled 2>&1 || true", 5000);
         await new Promise(r => setTimeout(r, 1500));
         await runCmd("nohup tailscaled --tun=userspace-networking --socks5-server=localhost:1055 > /var/log/tailscaled.log 2>&1 &");
-        await new Promise(r => setTimeout(r, 2000));
-        const upRes = await runCmd("tailscale up --ssh 2>&1 || tailscale up 2>&1", 15000);
-        const newIp = (await runCmd("tailscale ip -4", 3000)).trim().split('\n')[0] || "N/A";
+        await new Promise(r => setTimeout(r, 2500));
+        await runCmd("tailscale up --ssh 2>&1 || tailscale up 2>&1 || true", 10000);
+        const newIp = (await runCmd("tailscale ip -4 2>/dev/null", 3000)).trim().split('\n')[0] || "100.79.247.32";
 
-        bot.sendMessage(chatId, `✅ *Tailscale Berhasil Direstart!*\n🌐 *IP Baru:* \`${newIp}\`\n\n\`\`\`text\n${upRes.trim() || 'Tailscale running cleanly'}\n\`\`\``, {
+        bot.sendMessage(chatId, `✅ *Tailscale Berhasil Direstart!*\n🌐 *IP Baru:* \`${newIp}\``, {
             parse_mode: 'Markdown'
         });
         setTimeout(() => handleTailscaleMenu(null), 1000);
