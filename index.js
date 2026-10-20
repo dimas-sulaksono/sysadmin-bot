@@ -14,6 +14,7 @@ bot.setMyCommands([
     { command: 'logs', description: 'Ambil Log Servis' },
     { command: 'deploy', description: 'Manual Deploy / Update' },
     { command: 'network', description: 'Cek Status Jaringan' },
+    { command: 'ssh', description: 'Kontrol / Restart OpenSSH' },
     { command: 'tailscale', description: 'Kontrol / Hidupkan Tailscale VPN' },
     { command: 'speedtest', description: 'Uji Kecepatan Internet' },
     { command: 'backup', description: 'Backup Konfigurasi Sistem ke Telegram' },
@@ -48,7 +49,8 @@ async function handleRestartMenu(msg) {
         reply_markup: {
             inline_keyboard: [
                 [{ text: 'sysadmin-bot', callback_data: 'restart_sysadmin-bot' }, { text: 'vermi-web', callback_data: 'restart_vermi-web' }],
-                [{ text: 'cloudflare-tunnel', callback_data: 'restart_cloudflare-tunnel' }, { text: 'mariadb', callback_data: 'restart_mariadb' }]
+                [{ text: 'cloudflare-tunnel', callback_data: 'restart_cloudflare-tunnel' }, { text: 'mariadb', callback_data: 'restart_mariadb' }],
+                [{ text: '🔑 OpenSSH (Port 8022)', callback_data: 'restart_openssh' }, { text: '🛡️ Tailscale SSH', callback_data: 'restart_ts_ssh' }]
             ]
         }
     });
@@ -72,6 +74,67 @@ async function handleDeploy(msg) {
     bot.sendMessage(chatId, '🚀 *Memulai Manual Deploy...*', { parse_mode: 'Markdown' });
     const out = await runCmd("bash /root/scripts/deploy-sysadmin-bot.sh", 15000);
     bot.sendMessage(chatId, `\`\`\`text\n${out.substring(0, 3900)}\n\`\`\``, { parse_mode: 'Markdown' });
+}
+
+async function getSshInfo() {
+    let isOpenSshRunning = false;
+    let openSshPid = "N/A";
+    let isTailscaleSshRunning = false;
+
+    try {
+        const pgrep = (await runCmd("pgrep sshd | head -1")).trim();
+        if (pgrep) {
+            isOpenSshRunning = true;
+            openSshPid = pgrep;
+        }
+    } catch (e) {}
+
+    try {
+        const tsStatus = await runCmd("tailscale status 2>&1");
+        if (tsStatus && !tsStatus.includes("Tailscale is stopped") && !tsStatus.includes("failed to connect")) {
+            isTailscaleSshRunning = true;
+        }
+    } catch (e) {}
+
+    return { isOpenSshRunning, openSshPid, isTailscaleSshRunning };
+}
+
+async function handleSshMenu(msg, editMessageId = null) {
+    const targetChatId = (msg && msg.chat) ? msg.chat.id.toString() : chatId;
+    if (targetChatId !== chatId) return;
+
+    const info = await getSshInfo();
+
+    const text = `🔑 *KONTROL OPENSSH & REMOTE ACCESS*
+
+📡 *OpenSSH (Port 8022):* ${info.isOpenSshRunning ? `🟢 Aktif (PID: \`${info.openSshPid}\`)` : '🔴 Mati / Inactive'}
+🛡️ *Tailscale SSH (Port 22):* ${info.isTailscaleSshRunning ? '🟢 Aktif' : '🔴 Mati / Offline'}
+
+Gunakan tombol di bawah untuk mengontrol service OpenSSH jarak jauh:`;
+
+    const reply_markup = {
+        inline_keyboard: [
+            [
+                { text: '🟢 Hidupkan OpenSSH', callback_data: 'ssh_start' },
+                { text: '🔴 Matikan OpenSSH', callback_data: 'ssh_stop' }
+            ],
+            [
+                { text: '🔄 Restart OpenSSH', callback_data: 'ssh_restart' },
+                { text: '🛡️ Reset Tailscale SSH', callback_data: 'restart_ts_ssh' }
+            ],
+            [
+                { text: '🔄 Refresh Status', callback_data: 'ssh_refresh' }
+            ]
+        ]
+    };
+
+    if (editMessageId) {
+        try {
+            await bot.editMessageText(text, { chat_id: chatId, message_id: editMessageId, parse_mode: 'Markdown', reply_markup });
+        } catch (e) { }
+    } else {
+        bot.sendMessage(chatId, text, { parse_mode: 'Markdown', reply_markup });
+    }
 }
 
 async function getTailscaleInfo() {
@@ -498,6 +561,47 @@ bot.on('callback_query', async (query) => {
         bot.answerCallbackQuery(query.id, { text: 'Memperbarui status...' });
         await handleTailscaleMenu(null, query.message.message_id);
     }
+
+    if (action === 'restart_openssh' || action === 'ssh_restart') {
+        bot.answerCallbackQuery(query.id, { text: 'Mereset OpenSSH...' });
+        bot.editMessageText('🔄 *Mereset OpenSSH (Port 8022)...*', { chat_id: chatId, message_id: query.message.message_id, parse_mode: 'Markdown' });
+        await runCmd("pkill -9 sshd 2>/dev/null || true");
+        await new Promise(r => setTimeout(r, 1000));
+        await runCmd("/data/data/com.termux/files/usr/bin/sshd 2>&1 || sshd 2>&1 || true");
+        await new Promise(r => setTimeout(r, 1000));
+        const newPid = (await runCmd("pgrep sshd | head -1")).trim();
+        bot.sendMessage(chatId, `✅ *OpenSSH Berhasil Di-restart!*\n📡 Port: \`8022\`\n⚙️ PID Baru: \`${newPid || 'Active'}\``, { parse_mode: 'Markdown' });
+    }
+
+    if (action === 'ssh_start') {
+        bot.answerCallbackQuery(query.id, { text: 'Menghidupkan OpenSSH...' });
+        bot.editMessageText('🚀 *Menghidupkan OpenSSH (Port 8022)...*', { chat_id: chatId, message_id: query.message.message_id, parse_mode: 'Markdown' });
+        const check = (await runCmd("pgrep sshd")).trim();
+        if (!check) {
+            await runCmd("/data/data/com.termux/files/usr/bin/sshd 2>&1 || sshd 2>&1 || true");
+            await new Promise(r => setTimeout(r, 1000));
+        }
+        const pid = (await runCmd("pgrep sshd | head -1")).trim();
+        bot.sendMessage(chatId, `✅ *OpenSSH Berjalan!*\n📡 Port: \`8022\`\n⚙️ PID: \`${pid || 'Active'}\``, { parse_mode: 'Markdown' });
+    }
+
+    if (action === 'ssh_stop') {
+        bot.answerCallbackQuery(query.id, { text: 'Mematikan OpenSSH...' });
+        bot.editMessageText('⚠️ *Mematikan OpenSSH (Port 8022)...*', { chat_id: chatId, message_id: query.message.message_id, parse_mode: 'Markdown' });
+        await runCmd("pkill -9 sshd 2>/dev/null || true");
+        bot.sendMessage(chatId, `🔴 *OpenSSH Dimatikan!*\nPort \`8022\` sekarang tertutup. Anda bisa menghidupkannya kembali kapan saja via Telegram.`, { parse_mode: 'Markdown' });
+    }
+
+    if (action === 'restart_ts_ssh') {
+        bot.answerCallbackQuery(query.id, { text: 'Mereset Tailscale SSH...' });
+        await runCmd("tailscale up --ssh 2>&1 || true");
+        bot.sendMessage(chatId, `✅ *Tailscale SSH Direset & Diaktifkan!*`, { parse_mode: 'Markdown' });
+    }
+
+    if (action === 'ssh_refresh') {
+        bot.answerCallbackQuery(query.id, { text: 'Memperbarui status...' });
+        await handleSshMenu(null, query.message.message_id);
+    }
 });
 
 // Commands
@@ -506,6 +610,7 @@ bot.onText(/\/restart/, handleRestartMenu);
 bot.onText(/\/logs/, handleFetchLogsMenu);
 bot.onText(/\/deploy/, handleDeploy);
 bot.onText(/\/network/, handleNetwork);
+bot.onText(/\/ssh/, (msg) => handleSshMenu(msg));
 bot.onText(/\/tailscale/, (msg) => handleTailscaleMenu(msg));
 bot.onText(/\/speedtest/, handleSpeedtest);
 bot.onText(/\/backup/, handleBackup);
