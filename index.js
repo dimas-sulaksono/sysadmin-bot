@@ -1,6 +1,8 @@
 require('dotenv').config();
 const TelegramBot = require('node-telegram-bot-api');
 const { exec } = require('child_process');
+const fs = require('fs');
+const path = require('path');
 
 const token = process.env.TELEGRAM_TOKEN;
 const chatId = process.env.CHAT_ID;
@@ -286,6 +288,138 @@ async function handleDbBackupMenu(msg) {
     }
 }
 
+async function getDeviceHealth() {
+    let batPercent = null;
+    let isCharging = false;
+    let isFull = false;
+    let tempC = null;
+
+    // 1. Coba ADB dumpsys battery (paling cepat & akurat untuk Android)
+    try {
+        let adbOut = await runCmd('adb -s 127.0.0.1:5555 shell dumpsys battery', 1500);
+        if (!adbOut || !adbOut.includes('Current Battery Service state')) {
+            await runCmd('adb connect 127.0.0.1:5555', 1000);
+            adbOut = await runCmd('adb -s 127.0.0.1:5555 shell dumpsys battery', 2000);
+        }
+        if (!adbOut || !adbOut.includes('Current Battery Service state')) {
+            const dev = await runCmd("adb devices | grep -w 'device' | awk '{print $1}' | head -n 1", 1000);
+            if (dev) {
+                adbOut = await runCmd(`adb -s ${dev} shell dumpsys battery`, 2000);
+            }
+        }
+        if (adbOut && adbOut.includes('Current Battery Service state')) {
+            const levelMatch = adbOut.match(/level:\s*(\d+)/i);
+            const acMatch = adbOut.match(/AC powered:\s*(true|false)/i);
+            const usbMatch = adbOut.match(/USB powered:\s*(true|false)/i);
+            const wirelessMatch = adbOut.match(/Wireless powered:\s*(true|false)/i);
+            const statusMatch = adbOut.match(/status:\s*(\d+)/i);
+            const tempMatch = adbOut.match(/temperature:\s*(\d+)/i);
+
+            if (levelMatch) batPercent = parseInt(levelMatch[1]);
+            const ac = acMatch && acMatch[1].toLowerCase() === 'true';
+            const usb = usbMatch && usbMatch[1].toLowerCase() === 'true';
+            const wireless = wirelessMatch && wirelessMatch[1].toLowerCase() === 'true';
+            const status = statusMatch ? parseInt(statusMatch[1]) : 0;
+
+            isCharging = ac || usb || wireless || status === 2;
+            isFull = status === 5 || (batPercent === 100 && isCharging);
+            if (tempMatch) {
+                const rawTemp = parseFloat(tempMatch[1]);
+                tempC = rawTemp > 100 ? rawTemp / 10 : rawTemp;
+            }
+        }
+    } catch (e) { }
+
+    // 2. Fallback ke Termux battery status jika ADB tidak tersedia
+    if (batPercent === null) {
+        try {
+            const termuxBatOut = await runCmd("ssh -o StrictHostKeyChecking=no -p 8022 127.0.0.1 'PATH=/data/data/com.termux/files/usr/bin:$PATH termux-battery-status'", 2000);
+            if (termuxBatOut) {
+                const batJson = JSON.parse(termuxBatOut);
+                batPercent = batJson.percentage;
+                isCharging = batJson.status === 'CHARGING' || batJson.plugged !== 'UNPLUGGED';
+                isFull = batPercent === 100 && isCharging;
+                if (typeof batJson.temperature === 'number') {
+                    tempC = batJson.temperature;
+                }
+            }
+        } catch (e) { }
+    }
+
+    // 3. Fallback ke /sys/class/power_supply (Linux laptop / rooted server)
+    if (batPercent === null) {
+        try {
+            const psDir = '/sys/class/power_supply';
+            if (fs.existsSync(psDir)) {
+                const supplies = fs.readdirSync(psDir);
+                for (const s of supplies) {
+                    const capPath = path.join(psDir, s, 'capacity');
+                    if (fs.existsSync(capPath)) {
+                        batPercent = parseInt(fs.readFileSync(capPath, 'utf8').trim());
+                        const stPath = path.join(psDir, s, 'status');
+                        if (fs.existsSync(stPath)) {
+                            const st = fs.readFileSync(stPath, 'utf8').trim().toUpperCase();
+                            isCharging = st === 'CHARGING';
+                            isFull = st === 'FULL';
+                        }
+                        const tPath = path.join(psDir, s, 'temp');
+                        if (tempC === null && fs.existsSync(tPath)) {
+                            const raw = parseFloat(fs.readFileSync(tPath, 'utf8').trim());
+                            tempC = raw > 1000 ? raw / 1000 : (raw > 100 ? raw / 10 : raw);
+                        }
+                        break;
+                    }
+                }
+            }
+        } catch (e) { }
+    }
+
+    // 4. Fallback ke /sys/class/thermal untuk Suhu
+    if (tempC === null) {
+        try {
+            const thermalDir = '/sys/class/thermal';
+            if (fs.existsSync(thermalDir)) {
+                const zones = fs.readdirSync(thermalDir).filter(z => z.startsWith('thermal_zone'));
+                let batZoneTemp = null;
+                let fallbackZoneTemp = null;
+                for (const z of zones) {
+                    try {
+                        const typePath = path.join(thermalDir, z, 'type');
+                        const tempPath = path.join(thermalDir, z, 'temp');
+                        if (fs.existsSync(typePath) && fs.existsSync(tempPath)) {
+                            const type = fs.readFileSync(typePath, 'utf8').trim().toLowerCase();
+                            const raw = parseFloat(fs.readFileSync(tempPath, 'utf8').trim());
+                            const norm = raw > 1000 ? raw / 1000 : (raw > 100 ? raw / 10 : raw);
+                            if (norm > 0 && norm < 120) {
+                                if (type === 'battery' || type.includes('bms')) {
+                                    batZoneTemp = norm;
+                                    break;
+                                }
+                                if (!fallbackZoneTemp && (type.includes('cpu') || type.includes('soc') || type.includes('aoss'))) {
+                                    fallbackZoneTemp = norm;
+                                }
+                            }
+                        }
+                    } catch (e) { }
+                }
+                tempC = batZoneTemp !== null ? batZoneTemp : fallbackZoneTemp;
+            }
+        } catch (e) { }
+    }
+
+    let batStr = 'N/A';
+    if (batPercent !== null && !isNaN(batPercent)) {
+        let chargeText = '(Not Charging)';
+        if (isFull) chargeText = '(Full)';
+        else if (isCharging) chargeText = '(Charging)';
+        batStr = `${batPercent}% ${chargeText}`;
+    }
+
+    let genTempStr = tempC !== null && !isNaN(tempC) ? `${String(tempC.toFixed(1)).padStart(5, ' ')}°C` : 'N/A';
+
+    return { batStr, genTempStr };
+}
+
 async function handleStatus(msg) {
     if (msg.chat.id.toString() !== chatId) return;
 
@@ -344,16 +478,7 @@ async function handleStatus(msg) {
             cpuUsageStr = `├ CPU  ${cpuBar} ${overallPct.padStart(5, ' ')}%`;
         } catch (e) { }
 
-        let batStr = 'N/A';
-        let genTempStr = 'N/A';
-        try {
-            const termuxBatOut = await runCmd("ssh -o StrictHostKeyChecking=no -p 8022 127.0.0.1 'termux-battery-status'", 3000);
-            const batJson = JSON.parse(termuxBatOut);
-            const isCharging = batJson.status === 'CHARGING' || batJson.plugged !== 'UNPLUGGED';
-            const chargeText = isCharging ? '(Charging)' : '(Not Charging)';
-            batStr = `${batJson.percentage}% ${chargeText}`;
-            genTempStr = `${String(batJson.temperature.toFixed(1)).padStart(5, ' ')}°C`;
-        } catch (e) { }
+        const { batStr, genTempStr } = await getDeviceHealth();
 
         let cpuTempStr = "";
         try {
