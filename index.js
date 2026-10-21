@@ -11,6 +11,8 @@ const bot = new TelegramBot(token, { polling: true });
 // Register Native Bot Menu Commands
 bot.setMyCommands([
     { command: 'start', description: 'Mulai / Tampilkan Dasbor' },
+    { command: 'menu', description: 'Tampilkan Menu Keyboard' },
+    { command: 'hide', description: 'Sembunyikan Menu Keyboard' },
     { command: 'status', description: 'Cek Dasbor Utama' },
     { command: 'restart', description: 'Restart Servis' },
     { command: 'logs', description: 'Ambil Log Servis' },
@@ -36,10 +38,10 @@ const menuKeyboard = {
             [{ text: '🔄 Restart Servis' }, { text: '📜 Ambil Log' }],
             [{ text: '🚀 Manual Deploy' }, { text: '🕸️ Jaringan' }],
             [{ text: '📦 Backup Config' }, { text: '🗄️ Backup DB' }],
-            [{ text: '⚡ Speedtest' }, { text: '🛡️ Tailscale' }]
+            [{ text: '⚡ Speedtest' }, { text: '🛡️ Tailscale' }],
+            [{ text: '🙈 Sembunyikan Menu' }]
         ],
-        resize_keyboard: true,
-        is_persistent: true
+        resize_keyboard: true
     },
     parse_mode: 'Markdown'
 };
@@ -740,6 +742,8 @@ bot.onText(/\/tailscale/, (msg) => handleTailscaleMenu(msg));
 bot.onText(/\/speedtest/, handleSpeedtest);
 bot.onText(/\/backup/, handleBackup);
 bot.onText(/\/dbbackup/, handleDbBackupMenu);
+bot.onText(/\/menu/, handleShowMenu);
+bot.onText(/\/hide/, handleHideMenu);
 
 // Text buttons
 bot.on('message', (msg) => {
@@ -752,7 +756,23 @@ bot.on('message', (msg) => {
     if (msg.text === '⚡ Speedtest') handleSpeedtest(msg);
     if (msg.text === '📦 Backup Config') handleBackup(msg);
     if (msg.text === '🗄️ Backup DB') handleDbBackupMenu(msg);
+    if (msg.text === '🙈 Sembunyikan Menu') handleHideMenu(msg);
 });
+
+async function handleHideMenu(msg) {
+    if (msg.chat.id.toString() !== chatId) return;
+    bot.sendMessage(chatId, '🙈 *Menu keyboard disembunyikan.*\n\nKetik /menu atau /start kapan saja untuk memunculkan kembali.', {
+        parse_mode: 'Markdown',
+        reply_markup: {
+            remove_keyboard: true
+        }
+    });
+}
+
+async function handleShowMenu(msg) {
+    if (msg.chat.id.toString() !== chatId) return;
+    bot.sendMessage(chatId, '🤖 *Menu Keyboard Ditampilkan*', menuKeyboard);
+}
 
 bot.onText(/\/start/, (msg) => {
     if (msg.chat.id.toString() !== chatId) return;
